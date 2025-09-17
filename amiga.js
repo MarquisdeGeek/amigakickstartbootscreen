@@ -69,69 +69,99 @@ function setup() {
     ctx.mozImageSmoothingEnabled = false;
     ctx.webkitImageSmoothingEnabled = false;
     ctx.msImageSmoothingEnabled = false;
+
+    noLoop();
+    draw();
+
+    const fps = 20;
+    let frameIndex = 0;
+    let ival = setInterval(() => {
+        if (drawFrame()) {
+            clearInterval(ival);
+        }
+        // You can create the images, but why bother holding your finger on 'save'
+        // for 174 times?
+        // grabFrame(frameIndex);
+
+        // But if you do, rebuild the anim with something like:
+        // convert -delay 12 -layers Optimize `ls frame*.png` animated_result.gif
+        ++frameIndex;
+
+    }, 1000/fps);
 };
 
+function grabFrame(idx) {
+    const filename = `frame_${String(idx).padStart(3, '0')}.png`;
+
+    link.setAttribute('download', filename);
+    link.setAttribute('href', canvas.elt.toDataURL("image/png").replace("image/png", "image/octet-stream"));
+    link.click();
+}
+
+let idx;
+let px, py;
 function draw() {
     background(...rgbArray(bgColor));
+    idx = 0;
+}
+
+function drawFrame() {
     let fills = [];
+    let isComplete = false;
 
     // Offset by .5, so that the stroke is central
     // (It's supposed to minimize the anti-aliasing)
     let cx = 70.5;
     let cy = 40.5;
-    let px, py;
+    
+    // Read two bytes at a time.
+    const byte1 = bytes[idx];
+    const byte2 = bytes[idx + 1];
 
-    let idx = 0;
-    while (true) {
-        // Read two bytes at a time.
-        const byte1 = bytes[idx];
-        const byte2 = bytes[idx + 1];
+    idx += 2;
+
+    // If both bytes are FF, end the program.
+    if (byte1 === byte2 && byte1 === 0xff) {
+        isComplete = true;
+    }
+
+    // If the first byte is FF and the second byte is not, start drawing a polyline
+    // with the color index given in the second byte.
+    // Treat any subsequent two bytes as x,y coordinates belonging to that polyline except
+    // if the first byte is FF (see rules 2 and 3) or FE (see rule 4), which is where you
+    // stop drawing the line.
+    else if (byte1 === 0xff) {
+        stroke(...rgbArray(byte2));
+        noSmooth();
+        //
+        px = bytes[idx];
+        py = bytes[idx + 1];
+        idx += 2;
+    }
+    //
+
+    // If the first byte is FE, flood fill an area using the color index given in the
+    // second byte, starting from the point whose coordinates are given in the next two bytes.
+    else if (byte1 === 0xfe) {
+        const floodX = bytes[idx];
+        const floodY = bytes[idx + 1];
+
+        fills.push({
+            x: Math.floor(floodX + cx),
+            y: Math.floor(floodY + cy),
+            colorIndex: byte2
+        });
 
         idx += 2;
-
-        // If both bytes are FF, end the program.
-        if (byte1 === byte2 && byte1 === 0xff) {
-            break;
-        }
-
-        // If the first byte is FF and the second byte is not, start drawing a polyline
-        // with the color index given in the second byte.
-        // Treat any subsequent two bytes as x,y coordinates belonging to that polyline except
-        // if the first byte is FF (see rules 2 and 3) or FE (see rule 4), which is where you
-        // stop drawing the line.
-        if (byte1 === 0xff) {
-            stroke(...rgbArray(byte2));
-            noSmooth();
-            //
-            px = bytes[idx];
-            py = bytes[idx + 1];
-            idx += 2;
-        }
-        //
-
-        // If the first byte is FE, flood fill an area using the color index given in the
-        // second byte, starting from the point whose coordinates are given in the next two bytes.
-        else if (byte1 === 0xfe) {
-            const floodX = bytes[idx];
-            const floodY = bytes[idx + 1];
-
-            fills.push({
-                x: Math.floor(floodX + cx),
-                y: Math.floor(floodY + cy),
-                colorIndex: byte2
-            });
-
-            idx += 2;
-        }
-        //
-        else {
-            line(cx + px, cy + py, cx + byte1, cy + byte2);
-            px = byte1;
-            py = byte2;
-        }
-
     }
-    
+    //
+    else {
+        line(cx + px, cy + py, cx + byte1, cy + byte2);
+        px = byte1;
+        py = byte2;
+    }
+
+
     // Fill stuff
     loadPixels();
 
@@ -140,6 +170,7 @@ function draw() {
     }
 
     updatePixels();
-    noLoop();
+
+    return isComplete;
 }
 
